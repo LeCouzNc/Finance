@@ -151,10 +151,13 @@ const MONTHS=[["JAN","Janv."],["FEV","Fév."],["MAR","Mars"],["AVR","Avril"],["M
 const CODES=MONTHS.map(m=>m[0]), KEY='finance_v2';
 let S=null; try{S=JSON.parse(localStorage.getItem(KEY));}catch(e){}
 if(!S||!S.cats) S=JSON.parse(JSON.stringify(SEED));
-(function(){const o={};Object.keys(S.months).forEach(k=>{o[/^[A-Z]{3}$/.test(k)?'2026-'+k:k]=S.months[k]});S.months=o;
+function migrate(){const o={};Object.keys(S.months).forEach(k=>{o[/^[A-Z]{3}$/.test(k)?'2026-'+k:k]=S.months[k]});S.months=o;
   if((S.ver||0)<3){const ex=S.items.find(i=>i.cat==='expense');
     if(S.cats.some(c=>c.id==='expense')&&!S.items.some(i=>i.cat==='expense'&&i.name==='Revolut'))S.items.splice(ex?S.items.indexOf(ex):S.items.length,0,{id:'revolut',cat:'expense',name:'Revolut'});
-    S.ver=3}})();
+    S.ver=3}
+  if(S.ver<4){S.cats.forEach(c=>{if(['bill','debt','investment'].includes(c.id))c.pre=true});
+    Object.keys(S.months).forEach(k=>{if(+k.slice(0,4)>=2027){const m=S.months[k];Object.keys(m.v).forEach(id=>{const it=S.items.find(i=>i.id===id),c=it&&S.cats.find(x=>x.id===it.cat);if(c&&c.pre&&!m.v[id][1])m.v[id][1]=m.v[id][0]})}});S.ver=4}}
+migrate();
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 const $=id=>document.getElementById(id);
 const FULL=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -167,7 +170,7 @@ const fmt=n=>Math.round(n||0).toLocaleString('fr-FR').replace(/\u202f/g,' ')+' F
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function mo(k){let m=S.months[k];
   if(!m){const o=ord(k),ks=Object.keys(S.months).filter(x=>ord(x)<o).sort((a,b)=>ord(a)-ord(b)),p=ks.length?S.months[ks.pop()]:null;
-    m={start:0,checks:{},v:{}};if(p)Object.keys(p.v).forEach(id=>m.v[id]=[p.v[id][0],0]);S.months[k]=m}
+    m={start:0,checks:{},v:{}};if(p)Object.keys(p.v).forEach(id=>{const it=S.items.find(i=>i.id===id),c=it&&S.cats.find(x=>x.id===it.cat),b=p.v[id][0];m.v[id]=[b,c&&c.pre?b:0]});S.months[k]=m}
   m.title=FULL[CODES.indexOf(k.slice(5))]+' '+k.slice(0,4);return m}
 const val=(m,id)=>mo(m).v[id]||[0,0];
 const catItems=c=>S.items.filter(i=>i.cat===c.id);
@@ -209,14 +212,14 @@ function addItem(c){
     ([n,b,fw])=>{if(!n.trim())return;const id=uid();S.items.push({id,cat:c.id,name:n.trim()});setVal(id,0,b,fw);save();render()},null,'Ajouter');
 }
 function editCat(c){
-  sheet('Modifier la catégorie',[{l:'Nom',t:'text',v:c.label}],([n])=>{c.label=n.trim()||c.label;save();render()},
+  sheet('Modifier la catégorie',[{l:'Nom',t:'text',v:c.label},{l:'Mois futurs : pré-remplir le réel avec le budget',t:'check',v:!!c.pre}],([n,pr])=>{c.label=n.trim()||c.label;c.pre=pr;save();render()},
     {l:'Supprimer',f:()=>confirmDel('Supprimer « '+c.label+' » et ses postes ?',()=>delCat(c.id))});
 }
-$('addCat').onclick=()=>sheet('Nouvelle catégorie',[{l:'Nom',t:'text',v:''},{l:'Type',t:'select',v:'out',o:[['out','Sortie d\'argent'],['in','Entrée d\'argent']]}],
-  ([n,k])=>{if(!n.trim())return;const id=uid();S.cats.push({id,label:n.trim(),kind:k});save();render()},null,'Ajouter');
+$('addCat').onclick=()=>sheet('Nouvelle catégorie',[{l:'Nom',t:'text',v:''},{l:'Type',t:'select',v:'out',o:[['out','Sortie d\'argent'],['in','Entrée d\'argent']]},{l:'Mois futurs : pré-remplir le réel avec le budget',t:'check',v:false}],
+  ([n,k,pr])=>{if(!n.trim())return;const id=uid();S.cats.push({id,label:n.trim(),kind:k,pre:pr});save();render()},null,'Ajouter');
 $('startBtn').onclick=()=>sheet('Solde de départ · '+mo(active).title,[{l:'Montant (F)',t:'num',v:mo(active).start||0}],([n])=>{mo(active).start=n;save();render()});
 $('backupBtn').onclick=()=>sheet('Sauvegarde',[{l:'Copie ce texte pour sauvegarder, ou colle une sauvegarde pour restaurer',t:'area',v:JSON.stringify(S)}],
-  ([t])=>{try{const n=JSON.parse(t);if(!n.cats||!n.months)throw 0;S=n;save();render()}catch(e){sheet('Sauvegarde invalide',[],null)}},null,'Restaurer');
+  ([t])=>{try{const n=JSON.parse(t);if(!n.cats||!n.months)throw 0;S=n;migrate();save();render()}catch(e){sheet('Sauvegarde invalide',[],null)}},null,'Restaurer');
 $('editBtn').onclick=()=>{edit=!edit;$('editBtn').textContent=edit?'Terminer':'Modifier';$('editBtn').classList.toggle('gold',edit);render()};
 
 function pills(){
