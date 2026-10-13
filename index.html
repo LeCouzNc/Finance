@@ -100,6 +100,8 @@
   footer.note{font-size:11.5px; color:var(--ink-muted); text-align:center; margin:26px 10px 0; line-height:1.5;}
   .year-scroller{display:flex;gap:8px;overflow-x:auto;padding:0 16px 8px;scrollbar-width:none}
   .year-scroller::-webkit-scrollbar{display:none}
+  .auto{font-size:10px;color:var(--gold);border:1px solid var(--gold);border-radius:100px;padding:1px 7px;margin-left:6px;letter-spacing:.04em;vertical-align:middle}
+  .item input:disabled{opacity:.55}
   [hidden]{display:none!important}
   body{padding-bottom:calc(56px + env(safe-area-inset-bottom));}
   .btn{background:var(--panel-2);border:1px solid var(--hairline);color:var(--ink);border-radius:100px;padding:7px 14px;font:500 13px Inter,sans-serif;cursor:pointer}
@@ -156,7 +158,8 @@ function migrate(){const o={};Object.keys(S.months).forEach(k=>{o[/^[A-Z]{3}$/.t
     if(S.cats.some(c=>c.id==='expense')&&!S.items.some(i=>i.cat==='expense'&&i.name==='Revolut'))S.items.splice(ex?S.items.indexOf(ex):S.items.length,0,{id:'revolut',cat:'expense',name:'Revolut'});
     S.ver=3}
   if(S.ver<4){S.cats.forEach(c=>{if(['bill','debt','investment'].includes(c.id))c.pre=true});
-    Object.keys(S.months).forEach(k=>{if(+k.slice(0,4)>=2027){const m=S.months[k];Object.keys(m.v).forEach(id=>{const it=S.items.find(i=>i.id===id),c=it&&S.cats.find(x=>x.id===it.cat);if(c&&c.pre&&!m.v[id][1])m.v[id][1]=m.v[id][0]})}});S.ver=4}}
+    Object.keys(S.months).forEach(k=>{if(+k.slice(0,4)>=2027){const m=S.months[k];Object.keys(m.v).forEach(id=>{const it=S.items.find(i=>i.id===id),c=it&&S.cats.find(x=>x.id===it.cat);if(c&&c.pre&&!m.v[id][1])m.v[id][1]=m.v[id][0]})}});S.ver=4}
+  if(S.ver<5){S.items.forEach(it=>{const c=S.cats.find(x=>x.id===it.cat);if(c&&c.pre&&it.auto===undefined){const vs=Object.keys(S.months).map(k=>S.months[k].v[it.id]).filter(v=>v&&v[0]>0);it.auto=vs.length>0&&vs.every(v=>v[1]===v[0])}});S.ver=5}}
 migrate();
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 const $=id=>document.getElementById(id);
@@ -172,7 +175,7 @@ function mo(k){let m=S.months[k];
   if(!m){const o=ord(k),ks=Object.keys(S.months).filter(x=>ord(x)<o).sort((a,b)=>ord(a)-ord(b)),p=ks.length?S.months[ks.pop()]:null;
     m={start:0,checks:{},v:{}};if(p)Object.keys(p.v).forEach(id=>{const it=S.items.find(i=>i.id===id),c=it&&S.cats.find(x=>x.id===it.cat),b=p.v[id][0];m.v[id]=[b,c&&c.pre?b:0]});S.months[k]=m}
   m.title=FULL[CODES.indexOf(k.slice(5))]+' '+k.slice(0,4);return m}
-const val=(m,id)=>mo(m).v[id]||[0,0];
+const val=(m,id)=>{const v=mo(m).v[id]||[0,0],it=S.items.find(i=>i.id===id);return it&&it.auto?[v[0],v[0]]:v};
 const catItems=c=>S.items.filter(i=>i.cat===c.id);
 function sums(m,c){let b=0,a=0;catItems(c).forEach(i=>{const v=val(m,i.id);b+=v[0];a+=v[1]});return{b,a}}
 function totals(m){let b=mo(m).start||0,a=b;S.cats.forEach(c=>{const s=sums(m,c),k=c.kind==='in'?1:-1;b+=k*s.b;a+=k*s.a});return{b,a}}
@@ -203,20 +206,22 @@ function delCat(cid){S.items.filter(i=>i.cat===cid).forEach(i=>Object.keys(S.mon
   S.items=S.items.filter(i=>i.cat!==cid);S.cats=S.cats.filter(c=>c.id!==cid);save();render()}
 
 function editItem(it){
-  sheet('Modifier le poste',[{l:'Nom',t:'text',v:it.name},{l:'Budget · '+mo(active).title,t:'num',v:val(active,it.id)[0]},{l:'Appliquer ce budget aux mois suivants',t:'check',v:true}],
-    ([n,b,fw])=>{it.name=n.trim()||it.name;setVal(it.id,0,b,fw);save();render()},
+  sheet('Modifier le poste',[{l:'Nom',t:'text',v:it.name},{l:'Budget · '+mo(active).title,t:'num',v:val(active,it.id)[0]},{l:'Appliquer ce budget aux mois suivants',t:'check',v:true},{l:'Automatique : le réel suit le budget (rien à saisir)',t:'check',v:!!it.auto}],
+    ([n,b,fw,au])=>{it.name=n.trim()||it.name;
+      if(it.auto&&!au)Object.keys(S.months).forEach(k=>{const v=S.months[k].v[it.id];if(v)v[1]=v[0]});
+      it.auto=au;setVal(it.id,0,b,fw);save();render()},
     {l:'Supprimer',f:()=>confirmDel('Supprimer « '+it.name+' » de tous les mois ?',()=>delItem(it.id))});
 }
 function addItem(c){
-  sheet('Nouveau poste · '+c.label,[{l:'Nom',t:'text',v:''},{l:'Budget',t:'num',v:''},{l:'Même budget les mois suivants',t:'check',v:true}],
-    ([n,b,fw])=>{if(!n.trim())return;const id=uid();S.items.push({id,cat:c.id,name:n.trim()});setVal(id,0,b,fw);save();render()},null,'Ajouter');
+  sheet('Nouveau poste · '+c.label,[{l:'Nom',t:'text',v:''},{l:'Budget',t:'num',v:''},{l:'Même budget les mois suivants',t:'check',v:true},{l:'Automatique : le réel suit le budget (rien à saisir)',t:'check',v:!!c.pre}],
+    ([n,b,fw,au])=>{if(!n.trim())return;const id=uid();S.items.push({id,cat:c.id,name:n.trim(),auto:au});setVal(id,0,b,fw);save();render()},null,'Ajouter');
 }
 function editCat(c){
-  sheet('Modifier la catégorie',[{l:'Nom',t:'text',v:c.label},{l:'Mois futurs : pré-remplir le réel avec le budget',t:'check',v:!!c.pre}],([n,pr])=>{c.label=n.trim()||c.label;c.pre=pr;save();render()},
+  sheet('Modifier la catégorie',[{l:'Nom',t:'text',v:c.label}],([n])=>{c.label=n.trim()||c.label;save();render()},
     {l:'Supprimer',f:()=>confirmDel('Supprimer « '+c.label+' » et ses postes ?',()=>delCat(c.id))});
 }
-$('addCat').onclick=()=>sheet('Nouvelle catégorie',[{l:'Nom',t:'text',v:''},{l:'Type',t:'select',v:'out',o:[['out','Sortie d\'argent'],['in','Entrée d\'argent']]},{l:'Mois futurs : pré-remplir le réel avec le budget',t:'check',v:false}],
-  ([n,k,pr])=>{if(!n.trim())return;const id=uid();S.cats.push({id,label:n.trim(),kind:k,pre:pr});save();render()},null,'Ajouter');
+$('addCat').onclick=()=>sheet('Nouvelle catégorie',[{l:'Nom',t:'text',v:''},{l:'Type',t:'select',v:'out',o:[['out','Sortie d\'argent'],['in','Entrée d\'argent']]}],
+  ([n,k])=>{if(!n.trim())return;const id=uid();S.cats.push({id,label:n.trim(),kind:k});save();render()},null,'Ajouter');
 $('startBtn').onclick=()=>sheet('Solde de départ · '+mo(active).title,[{l:'Montant (F)',t:'num',v:mo(active).start||0}],([n])=>{mo(active).start=n;save();render()});
 $('backupBtn').onclick=()=>sheet('Sauvegarde',[{l:'Copie ce texte pour sauvegarder, ou colle une sauvegarde pour restaurer',t:'area',v:JSON.stringify(S)}],
   ([t])=>{try{const n=JSON.parse(t);if(!n.cats||!n.months)throw 0;S=n;migrate();save();render()}catch(e){sheet('Sauvegarde invalide',[],null)}},null,'Restaurer');
@@ -240,7 +245,7 @@ function cfRow(name,v,tot){
 function itemRow(c,it){
   const [b,a]=val(active,it.id), r=document.createElement('div');r.className='item';
   const pct=b>0?Math.min(1,a/b):(a>0?1:0), over=b>0&&a>b;
-  r.innerHTML=`<div class="item-main"><div class="item-name">${esc(it.name)}</div><div class="bar item-bar"><i style="width:${(pct*100).toFixed(0)}%" class="${over?'over':''}"></i></div></div><div class="item-nums numeric"><input type="number" inputmode="decimal" value="${Math.round(a)}"><span class="of">/ ${fmt(b)}</span></div>`;
+  r.innerHTML=`<div class="item-main"><div class="item-name">${esc(it.name)}${it.auto?'<span class="auto">auto</span>':''}</div><div class="bar item-bar"><i style="width:${(pct*100).toFixed(0)}%" class="${over?'over':''}"></i></div></div><div class="item-nums numeric"><input type="number" inputmode="decimal" value="${Math.round(a)}" ${it.auto?'disabled':''}><span class="of">/ ${fmt(b)}</span></div>`;
   const inp=r.querySelector('input');
   inp.onclick=e=>e.stopPropagation();
   inp.onchange=()=>{setVal(it.id,1,parseFloat(inp.value)||0,false);save();render()};
